@@ -119,6 +119,7 @@
     ],
   },
 ];
+const VIDEO_FEATURE_ENABLED = false;
 
 const tabsEl = document.getElementById("tabs");
 const fieldsEl = document.getElementById("fields");
@@ -137,6 +138,10 @@ const barOutputEl = document.getElementById("bar-output");
 
 const savedToolId = localStorage.getItem("pdf_nova_active_tool");
 let activeTool = tools.find((t) => t.id === savedToolId) || tools[0];
+if (!VIDEO_FEATURE_ENABLED && activeTool.id === "video_extract") {
+  activeTool = tools.find((t) => t.id !== "video_extract") || tools[0];
+  localStorage.setItem("pdf_nova_active_tool", activeTool.id);
+}
 const toolQueues = {};
 let lastOutputBytes = null;
 let capabilities = {
@@ -214,7 +219,7 @@ function ensureQueue(toolId) {
 
 function isToolEnabled(tool) {
   if (tool.id === "ocr") return !!capabilities.ocr_available;
-  if (tool.id === "video_extract") return !!capabilities.video_extract_available;
+  if (tool.id === "video_extract") return VIDEO_FEATURE_ENABLED && !!capabilities.video_extract_available;
   return true;
 }
 
@@ -306,7 +311,7 @@ function updateQueueFromFiles(fileList) {
 function renderTabs() {
   tabsEl.innerHTML = "";
   for (const tool of tools) {
-    if (tool.id === "video_extract" && !isToolEnabled(tool)) continue;
+    if (tool.id === "video_extract" && !VIDEO_FEATURE_ENABLED) continue;
     const btn = document.createElement("button");
     btn.type = "button";
     const disabled = !isToolEnabled(tool);
@@ -550,7 +555,7 @@ if (saveApiBtn) {
     .then((r) => r.json())
     .then((data) => {
       capabilities = data || capabilities;
-      if (activeTool.id === "video_extract" && !capabilities.video_extract_available) {
+      if (activeTool.id === "video_extract" && (!VIDEO_FEATURE_ENABLED || !capabilities.video_extract_available)) {
         activeTool = tools.find((t) => t.id !== "video_extract") || tools[0];
         localStorage.setItem("pdf_nova_active_tool", activeTool.id);
         renderFields();
