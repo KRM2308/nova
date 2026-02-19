@@ -44,6 +44,7 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition", "Content-Type"],
 )
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 

@@ -142,7 +142,8 @@ let lastOutputBytes = null;
 let capabilities = { ocr_available: true, ocr_note: "" };
 const storedApiBase = (localStorage.getItem("pdf_nova_api_base") || "").trim();
 const isLocalHost = ["127.0.0.1", "localhost"].includes(window.location.hostname);
-let apiBase = storedApiBase || (isLocalHost ? "" : "");
+const cloudBackendFallback = "https://pdf-nova-api.onrender.com";
+let apiBase = storedApiBase || (isLocalHost ? "" : cloudBackendFallback);
 const localBackendFallback = "http://127.0.0.1:8091";
 if (apiBaseInput) apiBaseInput.value = apiBase;
 
@@ -372,6 +373,17 @@ function buildFormData(form, tool) {
   return fd;
 }
 
+function inferExtension(contentType, toolId) {
+  const ct = (contentType || "").toLowerCase();
+  if (ct.includes("application/pdf")) return "pdf";
+  if (ct.includes("application/vnd.openxmlformats-officedocument.wordprocessingml.document")) return "docx";
+  if (ct.includes("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) return "xlsx";
+  if (ct.includes("application/zip")) return "zip";
+  if (ct.includes("text/plain")) return "txt";
+  if (toolId === "convert") return "pdf";
+  return "dat";
+}
+
 async function runTool(evt) {
   evt.preventDefault();
   setStatus("Traitement...");
@@ -396,7 +408,9 @@ async function runTool(evt) {
     renderMetrics(lastOutputBytes);
     const disposition = response.headers.get("content-disposition") || "";
     const fileMatch = disposition.match(/filename="([^"]+)"/);
-    const filename = fileMatch ? fileMatch[1] : `pdf_nova_${activeTool.id}.bin`;
+    const contentType = response.headers.get("content-type") || "";
+    const ext = inferExtension(contentType, activeTool.id);
+    const filename = fileMatch ? fileMatch[1] : `pdf_nova_${activeTool.id}.${ext}`;
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
     link.href = url;
