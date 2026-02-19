@@ -139,7 +139,14 @@ const savedToolId = localStorage.getItem("pdf_nova_active_tool");
 let activeTool = tools.find((t) => t.id === savedToolId) || tools[0];
 const toolQueues = {};
 let lastOutputBytes = null;
-let capabilities = { ocr_available: true, ocr_note: "", office_to_pdf_available: true, office_to_pdf_note: "" };
+let capabilities = {
+  ocr_available: true,
+  ocr_note: "",
+  office_to_pdf_available: true,
+  office_to_pdf_note: "",
+  video_extract_available: false,
+  video_extract_note: "",
+};
 const storedApiBase = (localStorage.getItem("pdf_nova_api_base") || "").trim();
 const isLocalHost = ["127.0.0.1", "localhost"].includes(window.location.hostname);
 const cloudBackendFallback = "https://pdf-nova-api.onrender.com";
@@ -203,6 +210,12 @@ function getPrimaryFileField(tool) {
 function ensureQueue(toolId) {
   if (!toolQueues[toolId]) toolQueues[toolId] = [];
   return toolQueues[toolId];
+}
+
+function isToolEnabled(tool) {
+  if (tool.id === "ocr") return !!capabilities.ocr_available;
+  if (tool.id === "video_extract") return !!capabilities.video_extract_available;
+  return true;
 }
 
 function inputForPrimaryFile() {
@@ -293,15 +306,26 @@ function updateQueueFromFiles(fileList) {
 function renderTabs() {
   tabsEl.innerHTML = "";
   for (const tool of tools) {
+    if (tool.id === "video_extract" && !isToolEnabled(tool)) continue;
     const btn = document.createElement("button");
     btn.type = "button";
-    const disabled = tool.id === "ocr" && !capabilities.ocr_available;
+    const disabled = !isToolEnabled(tool);
     btn.className = `tab ${tool.id === activeTool.id ? "active" : ""} ${disabled ? "disabled" : ""}`;
     btn.textContent = tool.label;
-    if (disabled) btn.title = capabilities.ocr_note || "OCR indisponible";
+    if (disabled) {
+      btn.title =
+        tool.id === "ocr"
+          ? capabilities.ocr_note || "OCR indisponible"
+          : capabilities.video_extract_note || "Module indisponible";
+    }
     btn.addEventListener("click", () => {
       if (disabled) {
-        setStatus(capabilities.ocr_note || "OCR indisponible.", true);
+        setStatus(
+          tool.id === "ocr"
+            ? capabilities.ocr_note || "OCR indisponible."
+            : capabilities.video_extract_note || "Module indisponible.",
+          true
+        );
         return;
       }
       activeTool = tool;
@@ -526,6 +550,14 @@ if (saveApiBtn) {
     .then((r) => r.json())
     .then((data) => {
       capabilities = data || capabilities;
+      if (activeTool.id === "video_extract" && !capabilities.video_extract_available) {
+        activeTool = tools.find((t) => t.id !== "video_extract") || tools[0];
+        localStorage.setItem("pdf_nova_active_tool", activeTool.id);
+        renderFields();
+        updateDropzoneHint();
+        renderQueue();
+        renderMetrics();
+      }
       if (!capabilities.ocr_available && activeTool.id === "ocr") {
         activeTool = tools[0];
         renderFields();

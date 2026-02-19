@@ -11,6 +11,7 @@ import zipfile
 from collections import defaultdict, deque
 from pathlib import Path
 from typing import Iterable, List, Optional, Set
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -64,6 +65,7 @@ API_KEY = os.getenv("PDF_NOVA_API_KEY", "").strip()
 REQUIRE_API_KEY = _as_bool(os.getenv("PDF_NOVA_REQUIRE_API_KEY", "false"), default=False)
 RATE_LIMIT_WINDOW_SEC = max(1, int(os.getenv("PDF_NOVA_RATE_LIMIT_WINDOW_SEC", "60")))
 RATE_LIMIT_MAX_REQUESTS = max(1, int(os.getenv("PDF_NOVA_RATE_LIMIT_MAX_REQUESTS", "40")))
+ENABLE_VIDEO_EXTRACT = _as_bool(os.getenv("PDF_NOVA_ENABLE_VIDEO_EXTRACT", "false"), default=False)
 _RATE_BUCKETS: dict[str, deque[float]] = defaultdict(deque)
 _RATE_LOCK = threading.Lock()
 _UNPROTECTED_PATHS = {"/api/health"}
@@ -325,6 +327,48 @@ def _find_soffice() -> Optional[str]:
     return None
 
 
+def _truthy_env(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _video_source_key(source: str, video_url: str) -> str:
+    explicit = (source or "").strip().lower()
+    if explicit:
+        return explicit
+    try:
+        host = (urlparse(video_url).hostname or "").lower()
+    except Exception:
+        host = ""
+    if "youtu" in host:
+        return "youtube"
+    if "tiktok" in host:
+        return "tiktok"
+    if host in {"x.com", "www.x.com"} or "twitter.com" in host:
+        return "x"
+    return "social"
+
+
+def _resolve_downloaded_path(ydl, info: dict, fallback_job_dir: Path) -> Path:
+    requested = info.get("requested_downloads") or []
+    if requested:
+        fp = requested[0].get("filepath")
+        if fp:
+            return Path(fp)
+    direct = info.get("_filename")
+    if direct:
+        return Path(direct)
+    prepared = ydl.prepare_filename(info)
+    if prepared:
+        return Path(prepared)
+    generated = sorted(fallback_job_dir.glob("video.*"))
+    if generated:
+        return generated[0]
+    return fallback_job_dir / "video.mp4"
+
+
 def _prepare_excel_single_page(src: Path, out_dir: Path) -> Path:
     """Force workbook print settings to fit each sheet on one page."""
     out = out_dir / "single_page_input.xlsx"
@@ -491,8 +535,12 @@ def capabilities() -> JSONResponse:
         {
             "ocr_available": ocr_available,
             "ocr_note": ocr_note,
-            "video_extract_available": True,
-            "video_extract_note": "yt-dlp actif. ffmpeg requis pour une fusion optimale audio+video.",
+            "video_extract_available": ENABLE_VIDEO_EXTRACT,
+            "video_extract_note": (
+                "Module video temporairement desactive."
+                if not ENABLE_VIDEO_EXTRACT
+                else "yt-dlp actif. ffmpeg requis pour une fusion optimale audio+video."
+            ),
             "office_to_pdf_available": _find_soffice() is not None,
             "office_to_pdf_note": "LibreOffice requis pour DOCX/XLSX/PPTX -> PDF.",
         }
@@ -789,6 +837,8 @@ async def video_extract_mp4(
     source: str = Form(""),
     owns_rights: str = Form("false"),
 ) -> FileResponse:
+    if not ENABLE_VIDEO_EXTRACT:
+        raise HTTPException(status_code=404, detail="Module video desactive temporairement.")
     video_url = video_url.strip()
     if not video_url:
         raise HTTPException(status_code=400, detail="URL obligatoire.")
@@ -801,24 +851,71 @@ async def video_extract_mp4(
     job_dir = _new_job_dir()
     out_tmpl = str(job_dir / "video.%(ext)s")
     ffmpeg_ok = _is_ffmpeg_available()
+    source_key = _video_source_key(source, video_url)
     ydl_opts = {
         "outtmpl": out_tmpl,
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
-        "format": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best" if ffmpeg_ok else "best[ext=mp4]/best",
         "merge_output_format": "mp4",
         "restrictfilenames": True,
+        "socket_timeout": 20,
+        "retries": 3,
+        "fragment_retries": 3,
+        "http_headers": {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9,fr;q=0.8",
+        },
+        "geo_bypass": True,
+        "nocheckcertificate": _truthy_env("YTDLP_NOCHECKCERTIFICATE", default=False),
     }
+    cookies_file = os.getenv("YTDLP_COOKIES_FILE", "").strip()
+    if cookies_file and Path(cookies_file).exists():
+        ydl_opts["cookiefile"] = cookies_file
 
+    if source_key == "youtube":
+        ydl_opts["extractor_args"] = {"youtube": {"player_client": ["android", "web"]}}
+
+    format_candidates = (
+        [
+            "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
+            "bestvideo+bestaudio/best",
+            "best",
+        ]
+        if ffmpeg_ok
+        else [
+            "best[ext=mp4]/best",
+            "best",
+        ]
+    )
+
+    last_exc: Exception | None = None
+    path_str = ""
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(video_url, download=True)
-            path_str = ydl.prepare_filename(info)
+        for fmt in format_candidates:
+            trial_opts = dict(ydl_opts)
+            trial_opts["format"] = fmt
+            try:
+                with yt_dlp.YoutubeDL(trial_opts) as ydl:
+                    info = ydl.extract_info(video_url, download=True)
+                    path_str = str(_resolve_downloaded_path(ydl, info, job_dir))
+                if path_str:
+                    break
+            except Exception as exc:
+                last_exc = exc
+                continue
+        if not path_str:
+            raise last_exc or RuntimeError("yt-dlp a echoue sans detail.")
     except Exception as exc:
         raise HTTPException(
             status_code=400,
-            detail=f"Extraction impossible pour ce lien ({source or 'platform'}).",
+            detail=(
+                f"Extraction impossible pour ce lien ({source_key}). "
+                "Si YouTube/TikTok bloque, configure YTDLP_COOKIES_FILE sur le serveur."
+            ),
         ) from exc
 
     result_path = Path(path_str)
