@@ -139,7 +139,7 @@ const savedToolId = localStorage.getItem("pdf_nova_active_tool");
 let activeTool = tools.find((t) => t.id === savedToolId) || tools[0];
 const toolQueues = {};
 let lastOutputBytes = null;
-let capabilities = { ocr_available: true, ocr_note: "" };
+let capabilities = { ocr_available: true, ocr_note: "", office_to_pdf_available: true, office_to_pdf_note: "" };
 const storedApiBase = (localStorage.getItem("pdf_nova_api_base") || "").trim();
 const isLocalHost = ["127.0.0.1", "localhost"].includes(window.location.hostname);
 const cloudBackendFallback = "https://pdf-nova-api.onrender.com";
@@ -156,6 +156,10 @@ function normalizeApiBase(url) {
 function apiUrl(path) {
   if (!apiBase) return path;
   return `${apiBase}${path}`;
+}
+
+async function apiFetch(path, options = {}) {
+  return fetch(apiUrl(path), options);
 }
 
 async function tryAutoConnectLocalBackend() {
@@ -229,7 +233,12 @@ function renderQueue() {
   }
   queue.forEach((file, index) => {
     const li = document.createElement("li");
-    li.innerHTML = `<span>${index + 1}. ${file.name}</span><span>${formatBytes(file.size)}</span>`;
+    const left = document.createElement("span");
+    left.textContent = `${index + 1}. ${file.name}`;
+    const right = document.createElement("span");
+    right.textContent = formatBytes(file.size);
+    li.appendChild(left);
+    li.appendChild(right);
     queueEl.appendChild(li);
   });
 }
@@ -330,8 +339,15 @@ function createInput(field) {
       const option = document.createElement("option");
       option.value = opt.value;
       option.textContent = opt.label;
+      if (field.name === "mode" && opt.value === "office_to_pdf" && !capabilities.office_to_pdf_available) {
+        option.disabled = true;
+        option.textContent = `${opt.label} (indisponible)`;
+      }
       if (field.value === opt.value) option.selected = true;
       input.appendChild(option);
+    }
+    if (field.name === "mode" && !capabilities.office_to_pdf_available && input.value === "office_to_pdf") {
+      input.value = "pdf_to_docx";
     }
   }
   if (field.type === "checkbox") input.value = "true";
@@ -419,7 +435,7 @@ async function runTool(evt) {
   syncQueueToInput();
   try {
     const formData = buildFormData(formEl, activeTool);
-    const response = await fetch(apiUrl(activeTool.endpoint), { method: "POST", body: formData });
+    const response = await apiFetch(activeTool.endpoint, { method: "POST", body: formData });
     if (!response.ok) {
       let detail = `${response.status}`;
       try {
@@ -492,7 +508,7 @@ if (saveApiBtn) {
     apiBase = normalizeApiBase(apiBaseInput ? apiBaseInput.value : "");
     localStorage.setItem("pdf_nova_api_base", apiBase);
     setStatus(apiBase ? `API backend configuree: ${apiBase}` : "API backend locale utilisee.");
-    fetch(apiUrl("/api/capabilities"))
+    apiFetch("/api/capabilities")
       .then((r) => r.json())
       .then((data) => {
         capabilities = data || capabilities;
@@ -506,7 +522,7 @@ if (saveApiBtn) {
 
 (async () => {
   await tryAutoConnectLocalBackend();
-  fetch(apiUrl("/api/capabilities"))
+  apiFetch("/api/capabilities")
     .then((r) => r.json())
     .then((data) => {
       capabilities = data || capabilities;

@@ -4,12 +4,15 @@ import os
 import re
 import shutil
 import subprocess
+import threading
+import time
 import uuid
 import zipfile
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import Iterable, List, Optional, Set
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -25,6 +28,7 @@ from pypdf import PdfReader, PdfWriter
 from reportlab.lib import colors
 from reportlab.pdfgen import canvas
 from PIL import Image
+from starlette.background import BackgroundTask
 
 APP_DIR = Path(__file__).resolve().parent
 TMP_DIR = APP_DIR / "tmp"
@@ -33,6 +37,36 @@ DEFAULT_TESSERACT_EXE = Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
 DEFAULT_TESSDATA_DIR = Path(r"C:\Users\karim\AppData\Local\Tesseract-OCR\tessdata")
 MAX_FILES = 50
 MAX_SIZE_BYTES = 150 * 1024 * 1024
+DEFAULT_CORS_ORIGINS = [
+    "http://localhost",
+    "http://127.0.0.1",
+    "http://localhost:8091",
+    "http://127.0.0.1:8091",
+]
+
+
+def _as_bool(value: str, default: bool) -> bool:
+    parsed = (value or "").strip().lower()
+    if not parsed:
+        return default
+    return parsed in {"1", "true", "yes", "on"}
+
+
+def _cors_origins_from_env() -> List[str]:
+    raw = os.getenv("PDF_NOVA_CORS_ORIGINS", "").strip()
+    if raw:
+        origins = [item.strip().rstrip("/") for item in raw.split(",") if item.strip()]
+        return origins or DEFAULT_CORS_ORIGINS
+    return DEFAULT_CORS_ORIGINS
+
+
+API_KEY = os.getenv("PDF_NOVA_API_KEY", "").strip()
+REQUIRE_API_KEY = _as_bool(os.getenv("PDF_NOVA_REQUIRE_API_KEY", "false"), default=False)
+RATE_LIMIT_WINDOW_SEC = max(1, int(os.getenv("PDF_NOVA_RATE_LIMIT_WINDOW_SEC", "60")))
+RATE_LIMIT_MAX_REQUESTS = max(1, int(os.getenv("PDF_NOVA_RATE_LIMIT_MAX_REQUESTS", "40")))
+_RATE_BUCKETS: dict[str, deque[float]] = defaultdict(deque)
+_RATE_LOCK = threading.Lock()
+_UNPROTECTED_PATHS = {"/api/health"}
 
 TMP_DIR.mkdir(parents=True, exist_ok=True)
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
@@ -40,13 +74,68 @@ STATIC_DIR.mkdir(parents=True, exist_ok=True)
 app = FastAPI(title="PDF Nova")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins_from_env(),
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key"],
     expose_headers=["Content-Disposition", "Content-Type"],
 )
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+def _extract_client_ip(request: Request) -> str:
+    xff = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    if xff:
+        return xff
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def _extract_supplied_api_key(request: Request) -> str:
+    header_key = (request.headers.get("x-api-key") or "").strip()
+    auth = (request.headers.get("authorization") or "").strip()
+    if auth.lower().startswith("bearer "):
+        bearer = auth[7:].strip()
+        if bearer:
+            return bearer
+    return header_key
+
+
+def _is_rate_limited(client_ip: str, now: float) -> bool:
+    with _RATE_LOCK:
+        bucket = _RATE_BUCKETS[client_ip]
+        cutoff = now - RATE_LIMIT_WINDOW_SEC
+        while bucket and bucket[0] < cutoff:
+            bucket.popleft()
+        if len(bucket) >= RATE_LIMIT_MAX_REQUESTS:
+            return True
+        bucket.append(now)
+        return False
+
+
+@app.middleware("http")
+async def _security_gate(request: Request, call_next):
+    path = request.url.path
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    if path.startswith("/api/") and path not in _UNPROTECTED_PATHS:
+        if REQUIRE_API_KEY:
+            if not API_KEY:
+                return JSONResponse(
+                    status_code=503,
+                    content={"detail": "API key non configuree sur le serveur."},
+                )
+            supplied_key = _extract_supplied_api_key(request)
+            if supplied_key != API_KEY:
+                return JSONResponse(status_code=401, content={"detail": "Non autorise."})
+        client_ip = _extract_client_ip(request)
+        if _is_rate_limited(client_ip, time.monotonic()):
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Trop de requetes. Reessaye dans une minute."},
+            )
+    return await call_next(request)
 
 
 def _new_job_dir() -> Path:
@@ -82,11 +171,15 @@ def _cleanup(path: Path) -> None:
 
 
 def _file_response(path: Path, filename: str, cleanup_path: Path | None = None) -> FileResponse:
-    if cleanup_path is not None:
-        # FastAPI does not expose a standard after-send hook on FileResponse.
-        # Cleanup is best effort at startup and by replacing old jobs manually.
-        pass
-    return FileResponse(path=str(path), filename=filename, media_type="application/octet-stream")
+    if cleanup_path is None and path.parent.parent == TMP_DIR and path.parent.name.startswith("job_"):
+        cleanup_path = path.parent
+    background = BackgroundTask(_cleanup, cleanup_path) if cleanup_path is not None else None
+    return FileResponse(
+        path=str(path),
+        filename=filename,
+        media_type="application/octet-stream",
+        background=background,
+    )
 
 
 def _parse_page_spec(spec: str, total_pages: int) -> List[int]:
@@ -209,6 +302,7 @@ def _is_ffmpeg_available() -> bool:
 def _find_soffice() -> Optional[str]:
     candidates = [
         "soffice",
+        "/usr/bin/soffice",
         r"C:\Program Files\LibreOffice\program\soffice.exe",
         r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
     ]

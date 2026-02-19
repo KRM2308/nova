@@ -5,11 +5,18 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# System packages required for OCR (Tesseract).
+# System packages required for OCR + Office to PDF conversion.
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    ffmpeg \
     tesseract-ocr \
     tesseract-ocr-eng \
     tesseract-ocr-fra \
+    libreoffice \
+    libreoffice-writer \
+    libreoffice-calc \
+    libreoffice-impress \
+    fonts-dejavu \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
