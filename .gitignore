@@ -1,0 +1,8 @@
+﻿build/
+dist/
+installer/PDFNovaDesktop_payload.zip
+PDFNovaDesktop_Windows_Install.zip
+__pycache__/
+*.pyc
+tmp/
+*.log

@@ -1,0 +1,69 @@
+﻿<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PDF Nova</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="icon" type="image/svg+xml" href="/static/logo-mark.svg" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260218a" />
+  </head>
+  <body>
+    <div class="bg-shape bg-shape-a"></div>
+    <div class="bg-shape bg-shape-b"></div>
+    <main class="app">
+      <header class="hero">
+        <img src="/static/logo.svg" alt="PDF Nova" class="hero-logo" />
+        <p class="kicker">PDF Nova</p>
+        <h1>PDF Nova</h1>
+        <p class="subtitle">
+          Merge, split, extraction, rotation, watermark et images vers PDF. En local.
+        </p>
+      </header>
+
+      <section class="panel">
+        <nav class="tabs" id="tabs"></nav>
+        <div class="api-config">
+          <label for="api-base">API backend</label>
+          <input id="api-base" type="text" placeholder="https://ton-backend.exemple.com" />
+          <button id="save-api-btn" type="button" class="ghost-btn">Sauver</button>
+        </div>
+        <form id="tool-form" class="tool-form">
+          <p id="tool-indicator" class="tool-indicator"></p>
+          <div id="fields"></div>
+          <div id="dropzone" class="dropzone">
+            <p>Glisse-depose tes fichiers ici ou utilise les champs ci-dessus.</p>
+          </div>
+          <div class="queue-head">
+            <strong>File Queue</strong>
+            <button id="clear-queue-btn" type="button" class="ghost-btn">Vider</button>
+          </div>
+          <ul id="file-queue" class="file-queue"></ul>
+          <div id="size-metrics" class="size-metrics">
+            <span>Entree: 0 B</span>
+            <span>Sortie: -</span>
+            <span>Ratio: -</span>
+          </div>
+          <div class="charts">
+            <div class="chart-card">
+              <p>Entree</p>
+              <div class="bar-track"><div id="bar-input" class="bar-value bar-input"></div></div>
+            </div>
+            <div class="chart-card">
+              <p>Sortie</p>
+              <div class="bar-track"><div id="bar-output" class="bar-value bar-output"></div></div>
+            </div>
+          </div>
+          <button id="run-btn" type="submit">Lancer</button>
+        </form>
+        <p id="status" class="status"></p>
+      </section>
+    </main>
+    <script src="/static/app.js?v=20260218a"></script>
+  </body>
+</html>

@@ -1,0 +1,27 @@
+<svg width="820" height="220" viewBox="0 0 820 220" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g1" x1="26" y1="20" x2="166" y2="166" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2A67FF"/>
+      <stop offset="1" stop-color="#0A8F5F"/>
+    </linearGradient>
+    <linearGradient id="g2" x1="62" y1="64" x2="148" y2="154" gradientUnits="userSpaceOnUse">
+      <stop stop-color="white" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="white" stop-opacity="0.72"/>
+    </linearGradient>
+    <filter id="shadow" x="0" y="0" width="230" height="220" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="12" stdDeviation="10" flood-color="#0C285D" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <rect x="24" y="18" width="150" height="168" rx="30" fill="url(#g1)"/>
+    <path d="M120 18V62C120 76.3594 131.641 88 146 88H174" stroke="url(#g2)" stroke-width="10" stroke-linecap="round"/>
+    <path d="M63 128L85 151L133 95" stroke="white" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <g>
+    <text x="220" y="116" fill="#101217" font-size="82" font-family="Space Grotesk, Arial, sans-serif" font-weight="700" letter-spacing="0.4">PDF</text>
+    <text x="418" y="116" fill="#2A67FF" font-size="82" font-family="Space Grotesk, Arial, sans-serif" font-weight="700" letter-spacing="0.4">Nova</text>
+    <text x="222" y="154" fill="#5E6067" font-size="25" font-family="IBM Plex Mono, Consolas, monospace" font-weight="500" letter-spacing="2.2">
+      SMART DOCUMENT OPERATIONS
+    </text>
+  </g>
+</svg>

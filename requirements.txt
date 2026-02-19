@@ -1,0 +1,12 @@
+fastapi==0.116.1
+uvicorn==0.35.0
+python-multipart==0.0.20
+pypdf==5.9.0
+Pillow==11.3.0
+reportlab==4.4.3
+pytesseract==0.3.13
+pypdfium2==4.30.0
+yt-dlp
+pdf2docx
+openpyxl
+requests
