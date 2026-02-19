@@ -384,6 +384,34 @@ function inferExtension(contentType, toolId) {
   return "dat";
 }
 
+function inferExtensionByTool(toolId) {
+  const map = {
+    merge: "pdf",
+    split: "zip",
+    extract: "pdf",
+    rotate: "pdf",
+    watermark: "pdf",
+    images: "pdf",
+    compress: "pdf",
+    remove_blank: "pdf",
+    ocr: "txt",
+    video_extract: "mp4",
+  };
+  return map[toolId] || "dat";
+}
+
+function inferConvertExt(form) {
+  const mode = (form.querySelector('[name="mode"]')?.value || "").trim().toLowerCase();
+  const map = {
+    pdf_to_docx: "docx",
+    pdf_to_images: "zip",
+    pdf_to_excel: "xlsx",
+    image_to_pdf: "pdf",
+    office_to_pdf: "pdf",
+  };
+  return map[mode] || "pdf";
+}
+
 async function runTool(evt) {
   evt.preventDefault();
   setStatus("Traitement...");
@@ -409,7 +437,10 @@ async function runTool(evt) {
     const disposition = response.headers.get("content-disposition") || "";
     const fileMatch = disposition.match(/filename="([^"]+)"/);
     const contentType = response.headers.get("content-type") || "";
-    const ext = inferExtension(contentType, activeTool.id);
+    let ext = inferExtension(contentType, activeTool.id);
+    if (ext === "dat") {
+      ext = activeTool.id === "convert" ? inferConvertExt(formEl) : inferExtensionByTool(activeTool.id);
+    }
     const filename = fileMatch ? fileMatch[1] : `pdf_nova_${activeTool.id}.${ext}`;
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
