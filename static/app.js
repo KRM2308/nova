@@ -519,7 +519,7 @@ if (saveApiBtn) {
       }
       renderTabs();
       if (!capabilities.ocr_available) {
-        setStatus(capabilities.ocr_note || "OCR indisponible.", true);
+        setStatus(capabilities.ocr_note || "OCR indisponible.");
       }
     })
     .catch(() => {
